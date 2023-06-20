@@ -1,0 +1,1 @@
+cargo deb --target=x86_64-unknown-linux-musl
