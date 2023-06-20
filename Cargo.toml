@@ -1,7 +1,6 @@
 [package]
 name = "fastify-pretty-log"
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
 description = "A simple log formatter for fastify"
 license = "MIT"
 authors = ["Erfan Safari <erfanshield@outlook.com>"]
