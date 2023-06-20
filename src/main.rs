@@ -151,8 +151,8 @@ fn handle_res_log(req_log: &ReqLog, value: Value, filter: &Option<String>) {
     println!(
         "{} {} {} {}",
         colorize_status_code(status_code),
-        req_log.req.url,
         req_log.req.method,
+        req_log.req.url,
         response_time
     );
 }
