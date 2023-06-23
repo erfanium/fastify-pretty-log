@@ -1,19 +1,19 @@
 #![allow(non_snake_case)]
 use clap::Parser;
 use serde::Deserialize;
+use serde_json::from_str;
+use serde_json::from_value;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 use std::process::exit;
 use termion::color;
 #[derive(Deserialize)]
-struct ReqLog {
-    req: Req,
-}
-
-#[derive(Deserialize)]
-struct ResLog {
-    res: Res,
+struct Log {
+    msg: String,
+    reqId: Option<String>,
+    req: Option<Req>,
+    res: Option<Res>,
     responseTime: Option<f64>,
     err: Option<Error>,
 }
@@ -42,6 +42,10 @@ struct Args {
     #[arg(short, long)]
     /// Filter the status code
     filter: Option<String>,
+
+    #[arg(short, long)]
+    /// no-error
+    no_errors: bool,
 }
 
 fn colorize_status_code(status_code: u16) -> String {
@@ -78,56 +82,56 @@ fn main() {
     }
 
     let stdin = io::stdin();
-    let mut req_logs: HashMap<String, ReqLog> = HashMap::new();
+    let mut req_logs: HashMap<String, Log> = HashMap::new();
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
-        let value: Result<Value, _> = serde_json::from_str(&line);
+        let value: Result<Log, _> = from_str(&line);
 
-        if let Ok(value) = value {
-            handle_json_line(&args, value, &mut req_logs, line);
+        if let Ok(log) = value {
+            handle_json_log(&args, log, &mut req_logs, line);
         } else {
             println!("{}", line);
         }
     }
 }
 
-fn handle_json_line(
-    args: &Args,
-    value: Value,
-    req_logs: &mut HashMap<String, ReqLog>,
-    raw_line: String,
-) {
-    if let Some(req_id_value) = value.get("reqId") {
-        let req_id = req_id_value.as_str().unwrap().to_string();
+fn handle_json_log(args: &Args, log: Log, req_logs: &mut HashMap<String, Log>, raw_line: String) {
+    let msg: &str = log.msg.as_ref();
 
-        if value.get("req").is_some() {
-            let log: ReqLog = serde_json::from_value(value).unwrap();
-            req_logs.insert(req_id.to_string(), log);
-        } else if value.get("res").is_some() {
-            req_logs.get(&req_id);
-            if let Some(req_log) = req_logs.get(&req_id) {
-                handle_res_log(req_log, value, &args.filter);
-            }
-            req_logs.remove(&req_id);
+    match msg {
+        "incoming request" => {
+            let req_id = log.reqId.clone().unwrap();
+            req_logs.insert(req_id, log);
         }
-    } else {
-        let message_to_log = match value.get("msg") {
-            Some(msg) => msg.as_str().unwrap().to_string(),
-            None => raw_line,
-        };
-
-        println!("{}", message_to_log);
+        "request completed" => {
+            let req_id = log.reqId.as_ref().unwrap();
+            let maybe_request_log = req_logs.remove(req_id);
+            match maybe_request_log {
+                Some(request_log) => {
+                    handle_res_log(&log, &request_log, &args.filter);
+                }
+                None => println!("{}", raw_line),
+            }
+        }
+        _ => match &log.err {
+            Some(err) => {
+                if args.no_errors {
+                    return;
+                }
+                handle_error_log(&log);
+            }
+            None => println!("{}", raw_line),
+        },
     }
 }
 
-fn handle_res_log(req_log: &ReqLog, value: Value, filter: &Option<String>) {
-    let log: ResLog = serde_json::from_value(value).unwrap();
-    let response_time = match log.responseTime {
+fn handle_res_log(response_log: &Log, request_log: &Log, filter: &Option<String>) {
+    let response_time = match response_log.responseTime {
         Some(time) => format!("{:.3}ms", time),
         None => "N/A".to_string(),
     };
-    let status_code = log.res.statusCode;
+    let status_code = response_log.res.as_ref().unwrap().statusCode;
 
     if filter.is_some() {
         if !filter_status_code(status_code, filter.as_ref().unwrap().as_str()) {
@@ -135,25 +139,25 @@ fn handle_res_log(req_log: &ReqLog, value: Value, filter: &Option<String>) {
         }
     }
 
-    if let Some(err) = &log.err {
-        println!(
-            "{}\n{}",
-            format!(
-                "{}{}{}",
-                color::Fg(color::Red),
-                err.message,
-                color::Fg(color::Reset)
-            ),
-            err.stack
-        );
-    }
-
     println!(
         "{} {} {} {}",
         colorize_status_code(status_code),
-        req_log.req.method,
-        req_log.req.url,
+        request_log.req.as_ref().unwrap().method,
+        request_log.req.as_ref().unwrap().url,
         response_time
+    );
+}
+
+fn handle_error_log(log: &Log) {
+    println!(
+        "{}\n{}",
+        format!(
+            "{}{}{}",
+            color::Fg(color::Red),
+            log.err.as_ref().unwrap().message,
+            color::Fg(color::Reset)
+        ),
+        log.err.as_ref().unwrap().stack
     );
 }
 
