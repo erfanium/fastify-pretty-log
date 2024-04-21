@@ -1,3 +1,6 @@
+{"level":30,"time":1713705289775,"pid":47123,"hostname":"tuf","name":"typeorm","msg":"Typeorm connected"}
+{"level":30,"time":1713705289807,"pid":47123,"hostname":"tuf","name":"cronjobs","msg":"started"}
+{"level":30,"time":1713705289878,"pid":47123,"hostname":"tuf","msg":"Server listening at http://0.0.0.0:3000"}
 {"level":30,"time":1687266671471,"pid":1,"hostname":"8522dc01acef","reqId":"req-ux","res":{"statusCode":200},"responseTime":8.887636184692383,"msg":"request completed"}
 {"level":30,"time":1687266704712,"pid":1,"hostname":"8522dc01acef","reqId":"req-uy","req":{"method":"GET","url":"/api/v1/suppliers?pageSize=10&page=1","hostname":"inventory.delinternet.com","remoteAddress":"192.168.240.1","remotePort":55840},"msg":"incoming request"}
 {"level":30,"time":1687266704738,"pid":1,"hostname":"8522dc01acef","reqId":"req-uy","res":{"statusCode":200},"responseTime":26.028146743774414,"msg":"request completed"}

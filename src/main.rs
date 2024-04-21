@@ -1,21 +1,37 @@
-#![allow(non_snake_case)]
 use clap::Parser;
 use serde::Deserialize;
 use serde_json::from_str;
-use serde_json::from_value;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 use std::process::exit;
 use termion::color;
 #[derive(Deserialize)]
-struct Log {
+struct BaseLog {
     msg: String,
-    reqId: Option<String>,
-    req: Option<Req>,
-    res: Option<Res>,
-    responseTime: Option<f64>,
-    err: Option<Error>,
+    // level: u32,
+    // time: u64,
+    name: Option<String>,
+}
+
+// define request log that extends log
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct WithRequestInfo {
+    req_id: String,
+    req: Request,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct WithResponseInfo {
+    req_id: String,
+    res: Res,
+    response_time: f64,
+}
+
+#[derive(Deserialize)]
+struct WithError {
+    err: Error,
 }
 
 #[derive(Deserialize)]
@@ -24,15 +40,16 @@ struct Error {
     stack: String,
 }
 
-#[derive(Deserialize)]
-struct Req {
+#[derive(Deserialize, Clone)]
+struct Request {
     method: String,
     url: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct Res {
-    statusCode: u16,
+    status_code: u16,
 }
 
 /// Simple program to greet a person
@@ -82,11 +99,11 @@ fn main() {
     }
 
     let stdin = io::stdin();
-    let mut req_logs: HashMap<String, Log> = HashMap::new();
+    let mut req_logs: HashMap<String, WithRequestInfo> = HashMap::new();
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
-        let value: Result<Log, _> = from_str(&line);
+        let value: Result<BaseLog, _> = from_str(&line);
 
         if let Ok(log) = value {
             handle_json_log(&args, log, &mut req_logs, line);
@@ -96,42 +113,52 @@ fn main() {
     }
 }
 
-fn handle_json_log(args: &Args, log: Log, req_logs: &mut HashMap<String, Log>, raw_line: String) {
-    let msg: &str = log.msg.as_ref();
-
-    match msg {
+fn handle_json_log(
+    args: &Args,
+    log: BaseLog,
+    req_logs: &mut HashMap<String, WithRequestInfo>,
+    raw_line: String,
+) {
+    let message: &str = &log.msg;
+    match message {
         "incoming request" => {
-            let req_id = log.reqId.clone().unwrap();
-            req_logs.insert(req_id, log);
+            let request_log: WithRequestInfo =
+                from_str(&raw_line).expect("Error parsing request log");
+            req_logs.insert(request_log.req_id.clone(), request_log);
         }
         "request completed" => {
-            let req_id = log.reqId.as_ref().unwrap();
-            let maybe_request_log = req_logs.remove(req_id);
+            let response_log: WithResponseInfo =
+                from_str(&raw_line).expect("Error parsing response log");
+            let maybe_request_log = req_logs.remove(&response_log.req_id);
             match maybe_request_log {
                 Some(request_log) => {
-                    handle_res_log(&log, &request_log, &args.filter);
+                    handle_res_log(&response_log, &request_log, &args.filter);
                 }
                 None => println!("{}", raw_line),
             }
         }
-        _ => match &log.err {
-            Some(err) => {
-                if args.no_errors {
-                    return;
+        _ => {
+            // check if raw_line
+            let maybe_with_err: Result<WithError, _> = from_str(&raw_line);
+            match maybe_with_err {
+                Ok(with_err) => {
+                    handle_error_log(log, &with_err);
                 }
-                handle_error_log(&log);
+                Err(_) => {
+                    println!("[{}] {}", log.name.unwrap_or('-'.to_string()), message);
+                }
             }
-            None => println!("{}", raw_line),
-        },
+        }
     }
 }
 
-fn handle_res_log(response_log: &Log, request_log: &Log, filter: &Option<String>) {
-    let response_time = match response_log.responseTime {
-        Some(time) => format!("{:.3}ms", time),
-        None => "N/A".to_string(),
-    };
-    let status_code = response_log.res.as_ref().unwrap().statusCode;
+fn handle_res_log(
+    response_log: &WithResponseInfo,
+    request_log: &WithRequestInfo,
+    filter: &Option<String>,
+) {
+    let time = format!("{:.3}ms", response_log.response_time);
+    let status_code = response_log.res.status_code;
 
     if filter.is_some() {
         if !filter_status_code(status_code, filter.as_ref().unwrap().as_str()) {
@@ -142,22 +169,31 @@ fn handle_res_log(response_log: &Log, request_log: &Log, filter: &Option<String>
     println!(
         "{} {} {} {}",
         colorize_status_code(status_code),
-        request_log.req.as_ref().unwrap().method,
-        request_log.req.as_ref().unwrap().url,
-        response_time
+        request_log.req.method,
+        request_log.req.url,
+        time
     );
 }
 
-fn handle_error_log(log: &Log) {
+fn handle_error_log(log: BaseLog, error_detail: &WithError) {
     println!(
         "{}\n{}",
-        format!(
-            "{}{}{}",
-            color::Fg(color::Red),
-            log.err.as_ref().unwrap().message,
-            color::Fg(color::Reset)
-        ),
-        log.err.as_ref().unwrap().stack
+        match log.name {
+            Some(name) => format!(
+                "{}[{}] {}{}",
+                color::Fg(color::Red),
+                name,
+                error_detail.err.message,
+                color::Fg(color::Reset)
+            ),
+            None => format!(
+                "{}{}{}",
+                color::Fg(color::Red),
+                error_detail.err.message,
+                color::Fg(color::Reset)
+            ),
+        },
+        error_detail.err.stack
     );
 }
 
